@@ -1,31 +1,33 @@
 // Global variables
 let croppieInstance = null;
 let uploadedImage = null;
+let originalImageFile = null; // Store original file for high quality processing
 let croppedImageData = null;
 let frameImage = new Image();
 
-// Canvas dimensions to match poster
-const CANVAS_SIZE = 1200; // High resolution for quality
+// Canvas dimensions to match poster - Increased for better quality
+const CANVAS_SIZE = 2400; // Much higher resolution for better quality
 const POSTER_SIZE = 3375; // Original poster size
 
 // Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     initializeApp();
 });
 
 function initializeApp() {
     // Load the frame image
+    frameImage.crossOrigin = 'anonymous'; // ✅ Add this line
     frameImage.src = 'poster/poster.png';
     // Remove crossOrigin for local files
     // frameImage.crossOrigin = 'anonymous';
 
     // Add error handling for frame image
-    frameImage.onerror = function() {
+    frameImage.onerror = function () {
         console.error('Failed to load frame image');
         showError('Failed to load frame image. Please check if the poster file exists.');
     };
 
-    frameImage.onload = function() {
+    frameImage.onload = function () {
         console.log('Frame image loaded successfully:', frameImage.width, 'x', frameImage.height);
     };
 
@@ -39,15 +41,15 @@ function initializeApp() {
 function setupEventListeners() {
     const photoInput = document.getElementById('photo-input');
     const uploadArea = document.getElementById('upload-area');
-    
+
     // File input change event
     photoInput.addEventListener('change', handleFileSelect);
-    
+
     // Drag and drop events
     uploadArea.addEventListener('dragover', handleDragOver);
     uploadArea.addEventListener('dragleave', handleDragLeave);
     uploadArea.addEventListener('drop', handleDrop);
-    
+
     // Click to upload (only on upload content, not button)
     uploadArea.addEventListener('click', (e) => {
         // Prevent double click if clicking on button
@@ -82,7 +84,7 @@ function handleDrop(event) {
     event.preventDefault();
     event.stopPropagation();
     document.getElementById('upload-area').classList.remove('dragover');
-    
+
     const files = event.dataTransfer.files;
     if (files.length > 0 && files[0].type.startsWith('image/')) {
         processImageFile(files[0]);
@@ -92,8 +94,11 @@ function handleDrop(event) {
 }
 
 function processImageFile(file) {
+    // Store the original file for high-quality processing
+    originalImageFile = file;
+
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = function (e) {
         uploadedImage = e.target.result;
         showCropSection();
     };
@@ -104,7 +109,7 @@ function showCropSection() {
     // Hide upload section and show crop section
     document.getElementById('upload-section').style.display = 'none';
     document.getElementById('crop-section').style.display = 'block';
-    
+
     // Initialize CropMe
     setTimeout(() => {
         initializeCropMe();
@@ -191,7 +196,7 @@ function addMobileTouchFeatures() {
     let initialDistance = 0;
     let initialZoom = 0;
 
-    cropArea.addEventListener('touchstart', function(e) {
+    cropArea.addEventListener('touchstart', function (e) {
         if (e.touches.length === 2) {
             e.preventDefault();
             const touch1 = e.touches[0];
@@ -204,7 +209,7 @@ function addMobileTouchFeatures() {
         }
     });
 
-    cropArea.addEventListener('touchmove', function(e) {
+    cropArea.addEventListener('touchmove', function (e) {
         if (e.touches.length === 2) {
             e.preventDefault();
             const touch1 = e.touches[0];
@@ -223,7 +228,7 @@ function addMobileTouchFeatures() {
     // Add haptic feedback for zoom buttons (if supported)
     const zoomButtons = document.querySelectorAll('.btn-zoom');
     zoomButtons.forEach(button => {
-        button.addEventListener('click', function() {
+        button.addEventListener('click', function () {
             if (navigator.vibrate) {
                 navigator.vibrate(50); // Short vibration
             }
@@ -232,7 +237,7 @@ function addMobileTouchFeatures() {
 }
 
 function applyCrop() {
-    if (!croppieInstance) {
+    if (!croppieInstance || !originalImageFile) {
         showError('No image to crop.');
         return;
     }
@@ -240,24 +245,79 @@ function applyCrop() {
     // Show loading
     showLoading();
 
-    // Get cropped image with Croppie
-    croppieInstance.result({
-        type: 'base64',
-        size: {
-            width: CANVAS_SIZE,
-            height: CANVAS_SIZE
-        },
-        format: 'png',
-        quality: 1,
-        circle: false // We'll handle the circle in canvas
-    }).then(croppedImage => {
-        croppedImageData = croppedImage;
-        hideLoading();
-        showFrameSection();
-    }).catch(error => {
-        hideLoading();
-        console.error('Error cropping image:', error);
-        showError('Error cropping image. Please try again.');
+    // Get crop data from Croppie (position and zoom info)
+    const cropData = croppieInstance.get();
+    console.log('Crop data:', cropData);
+
+    // Process the original high-resolution image
+    processHighQualityImage(originalImageFile, cropData)
+        .then(croppedImage => {
+            croppedImageData = croppedImage;
+            hideLoading();
+            showFrameSection();
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error cropping image:', error);
+            showError('Error cropping image. Please try again.');
+        });
+}
+
+function processHighQualityImage(file, cropData) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = function() {
+            try {
+                // Create a high-resolution canvas for cropping
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                // Set canvas to very high resolution (4000px for ultra quality)
+                const outputSize = 4000;
+                canvas.width = outputSize;
+                canvas.height = outputSize;
+
+                // Enable high-quality rendering
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                // Calculate crop area based on Croppie data
+                const originalWidth = img.width;
+                const originalHeight = img.height;
+
+                // Get the crop area from Croppie data
+                const cropX = cropData.points[0];
+                const cropY = cropData.points[1];
+                const cropWidth = cropData.points[2] - cropData.points[0];
+                const cropHeight = cropData.points[3] - cropData.points[1];
+
+                console.log('Original image size:', originalWidth, 'x', originalHeight);
+                console.log('Crop area:', cropX, cropY, cropWidth, cropHeight);
+
+                // Draw the cropped portion of the original high-res image
+                ctx.drawImage(
+                    img,
+                    cropX, cropY, cropWidth, cropHeight, // Source crop area
+                    0, 0, outputSize, outputSize // Destination (full canvas)
+                );
+
+                // Convert to base64 with maximum quality
+                const croppedImageData = canvas.toDataURL('image/png', 1.0);
+                resolve(croppedImageData);
+
+            } catch (error) {
+                reject(error);
+            }
+        };
+
+        img.onerror = () => reject(new Error('Failed to load image'));
+
+        // Load the original file as image
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
     });
 }
 
@@ -265,7 +325,7 @@ function showFrameSection() {
     // Hide crop section and show frame section
     document.getElementById('crop-section').style.display = 'none';
     document.getElementById('frame-section').style.display = 'block';
-    
+
     // Start frame generation process
     generateFramedPhoto();
 }
@@ -273,15 +333,15 @@ function showFrameSection() {
 function generateFramedPhoto() {
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
-    
+
     // Simulate progress
     let progress = 0;
     const progressInterval = setInterval(() => {
         progress += Math.random() * 15;
         if (progress > 90) progress = 90;
-        
+
         progressFill.style.width = progress + '%';
-        
+
         if (progress < 30) {
             progressText.textContent = 'Loading frame...';
         } else if (progress < 60) {
@@ -290,7 +350,7 @@ function generateFramedPhoto() {
             progressText.textContent = 'Applying frame...';
         }
     }, 200);
-    
+
     // Wait for frame image to load, then create final image
     if (frameImage.complete) {
         createFinalImage(progressInterval, progressFill, progressText);
@@ -306,21 +366,26 @@ function createFinalImage(progressInterval, progressFill, progressText) {
         clearInterval(progressInterval);
         progressFill.style.width = '100%';
         progressText.textContent = 'Complete!';
-        
+
         // Create canvas for final image
         const canvas = document.getElementById('final-canvas');
         const ctx = canvas.getContext('2d');
-        
+
         // Set canvas size to match poster dimensions for high quality
         canvas.width = CANVAS_SIZE;
         canvas.height = CANVAS_SIZE;
 
+        // Enable high-quality image rendering
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
         console.log('Canvas size set to:', canvas.width, 'x', canvas.height);
-        
+
         // Create image element for cropped photo
         const croppedImg = new Image();
-        croppedImg.onload = function() {
-            console.log('Cropped image loaded:', croppedImg.width, 'x', croppedImg.height);
+        croppedImg.crossOrigin = 'anonymous';
+        croppedImg.onload = function () {
+            console.log('High-quality cropped image loaded:', croppedImg.width, 'x', croppedImg.height);
 
             // Clear canvas first
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -330,11 +395,13 @@ function createFinalImage(progressInterval, progressFill, progressText) {
             const centerY = canvas.height / 2;
 
             // Calculate circle size based on poster frame design
-            // Adjust this based on where the circular area is in your poster
-            const circleRadius = canvas.width * 0.35; // 35% of canvas width for the photo area
+            const circleRadius = canvas.width * 0.50; // 50% of canvas width for the photo area
+
+            // Since our cropped image is already high quality (4000px), we can use it directly
             const imgSize = circleRadius * 2;
 
-            console.log('Drawing image at center:', centerX, centerY, 'circle radius:', circleRadius);
+            console.log('Using high-quality image:', croppedImg.width, 'x', croppedImg.height);
+            console.log('Drawing at circle radius:', circleRadius);
 
             // Create circular clipping path for the photo
             ctx.save();
@@ -342,8 +409,15 @@ function createFinalImage(progressInterval, progressFill, progressText) {
             ctx.arc(centerX, centerY, circleRadius, 0, 2 * Math.PI);
             ctx.clip();
 
-            // Draw the cropped image to fill the circle
-            ctx.drawImage(croppedImg, centerX - circleRadius, centerY - circleRadius, imgSize, imgSize);
+            // Draw the high-quality cropped image to fill the circle perfectly
+            // Since our cropped image is square and high-res, we can draw it directly
+            ctx.drawImage(
+                croppedImg,
+                centerX - circleRadius,
+                centerY - circleRadius,
+                imgSize,
+                imgSize
+            );
             ctx.restore();
 
             // Draw frame on top if it's loaded, scaled to canvas size
@@ -379,15 +453,77 @@ function downloadImage() {
     showLoading();
 
     setTimeout(() => {
-        const link = document.createElement('a');
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-        link.download = `donance-s-pro-photo-${timestamp}.png`;
-        link.href = canvas.toDataURL('image/png', 1.0); // Maximum quality
-        link.click();
+        // Create an ultra high-quality canvas for download
+        const downloadCanvas = document.createElement('canvas');
+        const downloadCtx = downloadCanvas.getContext('2d');
 
-        console.log('Downloaded image size:', canvas.width, 'x', canvas.height);
-        hideLoading();
-        showDownloadSuccess();
+        // Set maximum resolution for download (5000px for print quality)
+        const downloadSize = 5000;
+        downloadCanvas.width = downloadSize;
+        downloadCanvas.height = downloadSize;
+
+        // Enable maximum quality rendering
+        downloadCtx.imageSmoothingEnabled = true;
+        downloadCtx.imageSmoothingQuality = 'high';
+
+        // Recreate the image composition at ultra-high resolution
+        if (croppedImageData && frameImage.complete) {
+            const croppedImg = new Image();
+            croppedImg.onload = function() {
+                // Clear canvas
+                downloadCtx.clearRect(0, 0, downloadSize, downloadSize);
+
+                // Calculate positions for ultra-high resolution
+                const centerX = downloadSize / 2;
+                const centerY = downloadSize / 2;
+                const circleRadius = downloadSize * 0.50;
+                const imgSize = circleRadius * 2;
+
+                // Draw the high-quality image
+                downloadCtx.save();
+                downloadCtx.beginPath();
+                downloadCtx.arc(centerX, centerY, circleRadius, 0, 2 * Math.PI);
+                downloadCtx.clip();
+
+                // Draw the ultra-high quality cropped image
+                downloadCtx.drawImage(
+                    croppedImg,
+                    centerX - circleRadius,
+                    centerY - circleRadius,
+                    imgSize,
+                    imgSize
+                );
+                downloadCtx.restore();
+
+                // Draw the frame at ultra-high resolution
+                downloadCtx.drawImage(frameImage, 0, 0, downloadSize, downloadSize);
+
+                // Download the ultra-high quality image
+                const link = document.createElement('a');
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                link.download = `donance-s-pro-photo-${timestamp}.png`;
+                link.href = downloadCanvas.toDataURL('image/png', 1.0);
+                link.click();
+
+                console.log('Downloaded ultra-high quality image:', downloadSize, 'x', downloadSize);
+                hideLoading();
+                showDownloadSuccess();
+            };
+            croppedImg.src = croppedImageData;
+        } else {
+            // Fallback to canvas scaling if image data not available
+            downloadCtx.drawImage(canvas, 0, 0, downloadSize, downloadSize);
+
+            const link = document.createElement('a');
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            link.download = `donance-s-pro-photo-${timestamp}.png`;
+            link.href = downloadCanvas.toDataURL('image/png', 1.0);
+            link.click();
+
+            console.log('Downloaded image size:', downloadSize, 'x', downloadSize);
+            hideLoading();
+            showDownloadSuccess();
+        }
     }, 1000);
 }
 
@@ -457,21 +593,21 @@ function startOver() {
     croppieInstance = null;
     uploadedImage = null;
     croppedImageData = null;
-    
+
     // Reset file input
     document.getElementById('photo-input').value = '';
-    
+
     // Reset progress
     document.getElementById('progress-fill').style.width = '0%';
     document.getElementById('progress-text').textContent = 'Preparing...';
-    
+
     // Show upload section, hide others
     document.getElementById('upload-section').style.display = 'block';
     document.getElementById('crop-section').style.display = 'none';
     document.getElementById('frame-section').style.display = 'none';
     document.querySelector('.progress-container').style.display = 'block';
     document.getElementById('preview-container').style.display = 'none';
-    
+
     // Re-animate sections
     animateStepSections();
 }
